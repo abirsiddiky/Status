@@ -17,15 +17,15 @@ A lightweight Android client for [**Status**](https://github.com/dani3l0/Status)
 
 | Dashboard | CPU | Memory |
 |:---:|:---:|:---:|
-| ![Dashboard](docs/screenshots/dashboard.png) | ![CPU details](docs/screenshots/cpu.png) | ![Memory details](docs/screenshots/memory.png) |
+| ![Dashboard](/assets/Dashboard.png) | ![CPU details](/assets/cpu.png) | ![Memory details](/assets/ram.png) |
 
 | Storage | Network | Add server |
 |:---:|:---:|:---:|
-| ![Storage details](docs/screenshots/storage.png) | ![Network details](docs/screenshots/network.png) | ![Add server dialog](docs/screenshots/add-server.png) |
+| ![Storage details](/assets/storage.png) | ![Network details](/assets/net.png) | ![Add server dialog](/assets/add-server.png) |
 
 | Dark theme | Light theme | Servers (Settings) |
 |:---:|:---:|:---:|
-| ![Dark theme](docs/screenshots/dark.png) | ![Light theme](docs/screenshots/light.png) | ![Server list](docs/screenshots/servers.png) |
+| ![Dark theme](/assets/Dashboard.png) | ![Light theme](/assets/light.png) | ![Server list](/assets/settings.png) |
 
 ---
 
