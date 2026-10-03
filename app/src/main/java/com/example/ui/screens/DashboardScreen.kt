@@ -180,27 +180,21 @@ fun DashboardScreen(
                             )
                         }
                     } else {
-                        item(key = "awaiting_telemetry") {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 48.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                    CircularProgressIndicator(
-                                        color = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(36.dp),
-                                        strokeWidth = 3.dp
-                                    )
-                                    Spacer(modifier = Modifier.height(16.dp))
-                                    Text(
-                                        text = "Connecting to server…",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
-                            }
+                        // Lightweight placeholder cards (plain grey rounded boxes, no shimmer animation, no "N/A" values)
+                        item(key = "placeholder_cpu") {
+                            DashboardPlaceholderCard(height = 140.dp)
+                        }
+                        item(key = "placeholder_mem") {
+                            DashboardPlaceholderCard(height = 140.dp)
+                        }
+                        item(key = "placeholder_storage") {
+                            DashboardPlaceholderCard(height = 130.dp)
+                        }
+                        item(key = "placeholder_net") {
+                            DashboardPlaceholderCard(height = 120.dp)
+                        }
+                        item(key = "placeholder_sys") {
+                            DashboardPlaceholderCard(height = 140.dp)
                         }
                     }
 
@@ -327,3 +321,19 @@ fun EmptyServersView(onAddServer: () -> Unit) {
         }
     }
 }
+
+/**
+ * Lightweight placeholder card for initial telemetry wait:
+ * Plain grey rounded box, no shimmer animation, no "N/A" values.
+ */
+@Composable
+fun DashboardPlaceholderCard(height: androidx.compose.ui.unit.Dp) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(height)
+            .clip(RoundedCornerShape(20.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f))
+    )
+}
+

@@ -26,6 +26,12 @@ data class AppSettings(
     val themeMode: AppThemeMode = AppThemeMode.SYSTEM
 )
 
+data class ServerStoreSnapshot(
+    val servers: List<ServerConfig>,
+    val activeServerId: String?,
+    val settings: AppSettings
+)
+
 class ServerStore(private val context: Context) {
 
     private val json = Json {
@@ -43,13 +49,17 @@ class ServerStore(private val context: Context) {
         val THEME_MODE = stringPreferencesKey("theme_mode")
     }
 
-    val serversFlow: Flow<List<ServerConfig>> = context.dataStore.data
+    /**
+     * Reads everything needed for the first frame in ONE single DataStore read:
+     * server list, active server id, theme mode, refresh interval, reduce-animations.
+     */
+    val snapshotFlow: Flow<ServerStoreSnapshot> = context.dataStore.data
         .catch { exception ->
             if (exception is IOException) emit(emptyPreferences()) else throw exception
         }
         .map { prefs ->
             val raw = prefs[PreferencesKeys.SERVERS_JSON]
-            if (raw.isNullOrBlank()) {
+            val servers = if (raw.isNullOrBlank()) {
                 emptyList()
             } else {
                 try {
@@ -58,19 +68,7 @@ class ServerStore(private val context: Context) {
                     emptyList()
                 }
             }
-        }
-
-    val activeServerIdFlow: Flow<String?> = context.dataStore.data
-        .catch { exception ->
-            if (exception is IOException) emit(emptyPreferences()) else throw exception
-        }
-        .map { prefs -> prefs[PreferencesKeys.ACTIVE_SERVER_ID] }
-
-    val appSettingsFlow: Flow<AppSettings> = context.dataStore.data
-        .catch { exception ->
-            if (exception is IOException) emit(emptyPreferences()) else throw exception
-        }
-        .map { prefs ->
+            val activeId = prefs[PreferencesKeys.ACTIVE_SERVER_ID]
             val refresh = prefs[PreferencesKeys.REFRESH_INTERVAL_SECONDS] ?: 3
             val reduceAnim = prefs[PreferencesKeys.REDUCE_ANIMATIONS] ?: false
             val themeStr = prefs[PreferencesKeys.THEME_MODE] ?: AppThemeMode.SYSTEM.name
@@ -79,12 +77,22 @@ class ServerStore(private val context: Context) {
             } catch (e: Exception) {
                 AppThemeMode.SYSTEM
             }
-            AppSettings(
-                refreshIntervalSeconds = refresh,
-                reduceAnimations = reduceAnim,
-                themeMode = themeMode
+            ServerStoreSnapshot(
+                servers = servers,
+                activeServerId = activeId,
+                settings = AppSettings(
+                    refreshIntervalSeconds = refresh,
+                    reduceAnimations = reduceAnim,
+                    themeMode = themeMode
+                )
             )
         }
+
+    val serversFlow: Flow<List<ServerConfig>> = snapshotFlow.map { it.servers }
+
+    val activeServerIdFlow: Flow<String?> = snapshotFlow.map { it.activeServerId }
+
+    val appSettingsFlow: Flow<AppSettings> = snapshotFlow.map { it.settings }
 
     suspend fun saveServer(server: ServerConfig, makeActive: Boolean = true) {
         context.dataStore.edit { prefs ->
@@ -96,7 +104,9 @@ class ServerStore(private val context: Context) {
                 currentServers.add(server)
             }
             prefs[PreferencesKeys.SERVERS_JSON] = json.encodeToString(currentServers)
-            if (makeActive || prefs[PreferencesKeys.ACTIVE_SERVER_ID] == null) {
+
+            val currentActiveId = prefs[PreferencesKeys.ACTIVE_SERVER_ID]
+            if (makeActive || currentActiveId.isNullOrBlank() || currentServers.size == 1) {
                 prefs[PreferencesKeys.ACTIVE_SERVER_ID] = server.id
             }
         }
@@ -109,9 +119,10 @@ class ServerStore(private val context: Context) {
             prefs[PreferencesKeys.SERVERS_JSON] = json.encodeToString(currentServers)
 
             val currentActive = prefs[PreferencesKeys.ACTIVE_SERVER_ID]
-            if (currentActive == serverId) {
-                // Set active to first available or clear
-                prefs[PreferencesKeys.ACTIVE_SERVER_ID] = currentServers.firstOrNull()?.id ?: ""
+            if (currentActive == serverId || currentServers.none { it.id == currentActive }) {
+                // Deleting the active server switches to the first remaining server; deleting the last one goes to empty
+                val nextActive = currentServers.firstOrNull()?.id ?: ""
+                prefs[PreferencesKeys.ACTIVE_SERVER_ID] = nextActive
             }
         }
     }

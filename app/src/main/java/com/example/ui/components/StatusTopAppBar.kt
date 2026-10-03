@@ -1,6 +1,7 @@
 package com.example.ui.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -58,7 +59,7 @@ fun StatusTopAppBar(
     TopAppBar(
         modifier = modifier.testTag("status_top_app_bar"),
         title = {
-            if (isDashboard && savedServers.isNotEmpty()) {
+            if (isDashboard && savedServers.size > 1) {
                 Box {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
@@ -142,8 +143,14 @@ fun StatusTopAppBar(
         },
         actions = {
             // Theme toggle: sun/moon icon button on EVERY screen
-            val iconRes = if (themeMode == AppThemeMode.DARK) R.drawable.ic_sun else R.drawable.ic_moon
-            val desc = if (themeMode == AppThemeMode.DARK) "Switch to light theme" else "Switch to dark theme"
+            val isSystemDark = isSystemInDarkTheme()
+            val isDark = when (themeMode) {
+                AppThemeMode.SYSTEM -> isSystemDark
+                AppThemeMode.DARK -> true
+                AppThemeMode.LIGHT -> false
+            }
+            val iconRes = if (isDark) R.drawable.ic_sun else R.drawable.ic_moon
+            val desc = if (isDark) "Switch to light theme" else "Switch to dark theme"
 
             IconButton(
                 onClick = onToggleTheme,

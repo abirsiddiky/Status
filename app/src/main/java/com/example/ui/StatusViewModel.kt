@@ -16,17 +16,10 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-
-data class StatusMainUiState(
-    val servers: List<ServerConfig> = emptyList(),
-    val activeServer: ServerConfig? = null,
-    val showAddServerDialog: Boolean = false,
-    val editingServer: ServerConfig? = null
-)
 
 class StatusViewModel(
     application: Application
@@ -35,81 +28,102 @@ class StatusViewModel(
     private val serverStore: ServerStore = ServerStore(application)
     private val repository: StatusRepository = StatusRepository()
 
-    val appSettings: StateFlow<AppSettings> = serverStore.appSettingsFlow
+    /**
+     * Single StateFlow exposing the unified AppState loaded in ONE DataStore read:
+     * - [AppState.Loading] while initial read is underway (keeps splash screen visible)
+     * - [AppState.NoServer] only when DataStore has been read and 0 servers exist
+     * - [AppState.Ready] with verified active server and loaded settings
+     */
+    val appState: StateFlow<AppState> = serverStore.snapshotFlow
+        .map { snapshot ->
+            val servers = snapshot.servers
+            val settings = snapshot.settings
+
+            if (servers.isEmpty()) {
+                AppState.NoServer(settings = settings)
+            } else {
+                val active = if (servers.size == 1) {
+                    servers.first()
+                } else {
+                    servers.firstOrNull { it.id == snapshot.activeServerId } ?: servers.first()
+                }
+
+                // If active server ID in DataStore was missing or stale, persist the fallback
+                if (snapshot.activeServerId != active.id) {
+                    viewModelScope.launch {
+                        serverStore.setActiveServerId(active.id)
+                    }
+                }
+
+                AppState.Ready(
+                    servers = servers,
+                    activeServer = active,
+                    settings = settings
+                )
+            }
+        }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.Eagerly,
-            initialValue = AppSettings()
+            initialValue = AppState.Loading
         )
 
     val telemetryState: StateFlow<TelemetryState> = repository.telemetryState
 
     private val _dialogState = MutableStateFlow<Pair<Boolean, ServerConfig?>>(Pair(false, null))
-
-    val uiState: StateFlow<StatusMainUiState> = combine(
-        serverStore.serversFlow,
-        serverStore.activeServerIdFlow,
-        _dialogState
-    ) { servers, activeId, dialogState ->
-        val active = servers.find { it.id == activeId } ?: servers.firstOrNull()
-        StatusMainUiState(
-            servers = servers,
-            activeServer = active,
-            showAddServerDialog = dialogState.first,
-            editingServer = dialogState.second
-        )
-    }.stateIn(
-        scope = viewModelScope,
-        started = SharingStarted.Eagerly,
-        initialValue = StatusMainUiState()
-    )
+    val dialogState: StateFlow<Pair<Boolean, ServerConfig?>> = _dialogState.asStateFlow()
 
     private var pollingJob: Job? = null
     private var isAppActive: Boolean = false
 
     init {
-        // Observe active server changes to restart polling or reset telemetry
+        // Observe appState changes: start polling ONLY when state is Ready and for active server only
         viewModelScope.launch {
-            var previousActiveId: String? = null
-            uiState.collect { state ->
-                val active = state.activeServer
-                if (active != null && active.id != previousActiveId) {
-                    previousActiveId = active.id
-                    repository.resetForServer(active)
-                    if (isAppActive) {
-                        restartPolling(active, appSettings.value.refreshIntervalSeconds)
+            var currentActiveId: String? = null
+            var currentInterval = 3
+
+            appState.collect { state ->
+                if (state is AppState.Ready) {
+                    val active = state.activeServer
+                    val interval = state.settings.refreshIntervalSeconds
+
+                    val serverChanged = active.id != currentActiveId
+                    val intervalChanged = interval != currentInterval
+
+                    if (serverChanged) {
+                        currentActiveId = active.id
+                        currentInterval = interval
+                        repository.resetForServer(active)
+                        if (isAppActive) {
+                            restartPolling(active, interval)
+                        }
+                    } else if (intervalChanged) {
+                        currentInterval = interval
+                        if (isAppActive) {
+                            restartPolling(active, interval)
+                        }
                     }
-                } else if (active == null) {
-                    previousActiveId = null
+                } else {
+                    currentActiveId = null
                     stopPolling()
                 }
             }
         }
-
-        // Observe refresh interval changes
-        viewModelScope.launch {
-            appSettings.collect { settings ->
-                val active = uiState.value.activeServer
-                if (active != null && isAppActive) {
-                    restartPolling(active, settings.refreshIntervalSeconds)
-                }
-            }
-        }
     }
 
     /**
-     * Called when the UI lifecycle enters STARTED.
+     * Called when UI lifecycle enters STARTED.
      */
     fun onLifecycleStarted() {
         isAppActive = true
-        val active = uiState.value.activeServer
-        if (active != null) {
-            restartPolling(active, appSettings.value.refreshIntervalSeconds)
+        val state = appState.value
+        if (state is AppState.Ready) {
+            restartPolling(state.activeServer, state.settings.refreshIntervalSeconds)
         }
     }
 
     /**
-     * Called when the UI lifecycle drops below STARTED (e.g. backgrounded or stopped).
+     * Called when UI lifecycle drops below STARTED (e.g. backgrounded or stopped).
      */
     fun onLifecycleStopped() {
         isAppActive = false
@@ -133,9 +147,11 @@ class StatusViewModel(
     }
 
     fun refreshNow() {
-        val active = uiState.value.activeServer ?: return
-        viewModelScope.launch {
-            repository.poll(active)
+        val state = appState.value
+        if (state is AppState.Ready) {
+            viewModelScope.launch {
+                repository.poll(state.activeServer)
+            }
         }
     }
 
@@ -155,10 +171,6 @@ class StatusViewModel(
         viewModelScope.launch {
             serverStore.saveServer(server, makeActive)
             closeServerDialog()
-            repository.resetForServer(server)
-            if (isAppActive) {
-                restartPolling(server, appSettings.value.refreshIntervalSeconds)
-            }
         }
     }
 
@@ -178,12 +190,15 @@ class StatusViewModel(
         return repository.testServer(server)
     }
 
-    fun toggleTheme() {
-        val current = appSettings.value.themeMode
-        val next = when (current) {
-            AppThemeMode.SYSTEM -> AppThemeMode.DARK
-            AppThemeMode.DARK -> AppThemeMode.LIGHT
-            AppThemeMode.LIGHT -> AppThemeMode.SYSTEM
+    fun toggleTheme(isCurrentlyDark: Boolean? = null) {
+        val next = if (isCurrentlyDark != null) {
+            if (isCurrentlyDark) AppThemeMode.LIGHT else AppThemeMode.DARK
+        } else {
+            when (appState.value.settings.themeMode) {
+                AppThemeMode.DARK -> AppThemeMode.LIGHT
+                AppThemeMode.LIGHT -> AppThemeMode.DARK
+                AppThemeMode.SYSTEM -> AppThemeMode.DARK
+            }
         }
         viewModelScope.launch {
             serverStore.setThemeMode(next)
