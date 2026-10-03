@@ -1,0 +1,27 @@
+<resources>
+    <string name="app_name">Status</string>
+    <string name="server_status_online">Online</string>
+    <string name="server_status_offline">Offline</string>
+    <string name="server_dialog_title_add">Add server</string>
+    <string name="server_dialog_title_edit">Edit server</string>
+    <string name="server_name_label">Name (optional)</string>
+    <string name="server_scheme_label">Scheme</string>
+    <string name="server_host_label">IP address or domain</string>
+    <string name="server_port_label">Port</string>
+    <string name="server_path_label">Path (optional)</string>
+    <string name="action_test_connection">Test connection</string>
+    <string name="action_save">Save</string>
+    <string name="action_save_anyway">Save anyway</string>
+    <string name="action_retry">Retry</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_delete">Delete</string>
+    <string name="action_view_more">View more</string>
+    <string name="settings_title">Settings</string>
+    <string name="settings_servers_section">Servers</string>
+    <string name="settings_preferences_section">Preferences</string>
+    <string name="settings_refresh_interval">Refresh interval</string>
+    <string name="settings_reduce_animations">Reduce animations</string>
+    <string name="settings_theme_mode">Theme</string>
+    <string name="empty_servers_title">No servers configured</string>
+    <string name="empty_servers_subtitle">Add your Status monitor server to start tracking system performance.</string>
+</resources>
