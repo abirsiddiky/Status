@@ -1,8 +1,10 @@
 # Status Monitor
 
-A lightweight Android client for [**Status**](https://github.com/dani3l0/Status), the simple system monitor for small Linux home servers. Add your server once, open the app, and see CPU, memory, storage and network usage in real time.
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-> **Home-lab app.** Status Monitor is built for **personal home servers on a trusted local network** (mini PCs, Raspberry Pis, TV boxes, NAS boxes). It is **not designed for public internet exposure or for enterprise / production use.** See [Intended use and security](#intended-use-and-security).
+A lightweight Android client for [**Status**](https://github.com/dani3l0/Status), the simple system monitor for small Linux home servers. Add your server once, open the app, and see CPU, memory, storage, network and process information in real time.
+
+> **Home-lab app.** Status Monitor is built for **personal home servers on a trusted local network** (mini PCs, Raspberry Pis, TV boxes, NAS boxes). It is **not designed for public internet exposure** and should not be used without a trusted network boundary.
 
 ---
 
@@ -34,7 +36,7 @@ A lightweight Android client for [**Status**](https://github.com/dani3l0/Status)
 - **Dashboard** with gauges for CPU load and temperature, memory, storage and network, plus a System card (hostname, OS, uptime, load average, process count).
 - **Detail screens** for CPU, Memory, Storage and Network with smooth live charts (drawn with Compose Canvas, no chart libraries).
 - **Light and dark theme** with a toggle on every screen. The choice is saved, and the system theme is used on first launch.
-- **Graceful with missing data.** Sensors that a device does not expose (for example CPU temperature or frequency on some ARM boards) show `N/A` or a short "not available" message instead of crashing.
+- **Graceful with missing data.** Sensors that a device does not expose (for example CPU temperature or frequency on some ARM boards) show `N/A` or a short "not available" message instead of crashing the app.
 - **Test connection** before saving, with the real error message if it fails.
 - **Built for low-end phones.** Few dependencies, polling only while the app is visible, only the active server is polled, and a "Reduce animations" switch.
 
@@ -45,7 +47,7 @@ A lightweight Android client for [**Status**](https://github.com/dani3l0/Status)
 
 ## Setting up the server
 
-Install and run Status on your server by following the [official instructions](https://github.com/dani3l0/Status). By default it listens on port `9090`. The app reads `GET /api/status`, so make sure that URL opens in your phone's browser before adding the server.
+Install and run Status on your server by following the [official instructions](https://github.com/dani3l0/Status). By default it listens on port `9090`. The app reads `GET /api/status`, so make sure the endpoint is reachable from your phone.
 
 ## Using the app
 
@@ -68,7 +70,7 @@ Tech stack: Kotlin, Jetpack Compose (Material 3), Navigation Compose, ViewModel 
 Status Monitor is a **hobby project for home servers**. Please keep the following in mind:
 
 - **Home and LAN use only.** Use it on a network you trust. Do not expose your Status server to the public internet (no port forwarding to it).
-- **No authentication and no encryption by default.** Status itself has no login, and the app connects over plain HTTP unless you set up HTTPS yourself. Anyone who can reach the server's port can see its system information. Cleartext HTTP is allowed in the app on purpose, so that LAN servers work.
+- **No authentication and no encryption by default.** Status itself has no login, and the app connects over plain HTTP unless you set up HTTPS yourself. Anyone who can reach the server's port can access the status data.
 - **Not for enterprise or production environments.** There is no multi-user access control, audit logging, SLA, or hardening, and the app has not been security-reviewed for such use.
 - **Your data stays with you.** The app is designed to talk only to the servers you add. It does not include ads or analytics, and stores its settings locally on your phone.
 - **Provided as is, without warranty.** You are responsible for the security of your own network and devices.
@@ -90,4 +92,6 @@ If you need to reach your server from outside your home, put it behind a VPN (fo
 
 ## License
 
-Add your license here (for example MIT) and include a `LICENSE` file in the repository.
+This project is licensed under the [MIT License](LICENSE).
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
