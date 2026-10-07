@@ -1,17 +1,135 @@
 package com.example.data.model
 
 import androidx.compose.runtime.Immutable
+import com.example.util.FormatUtils
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.doubleOrNull
+import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.longOrNull
 import java.util.Locale
 
 /**
- * Immutable domain models used by the presentation layer.
- * All units are normalized (bytes, %, seconds, Mbit/s).
+ * Single temperature reading from a sensor or core.
  */
+@Immutable
+data class TempReading(
+    val label: String,
+    val current: Double,
+    val limit: Double? = null
+)
 
+/**
+ * Helper conversions on [JsonElement] for resilient parsing of numbers
+ * arriving as Int, Long, Double or numeric String.
+ */
+fun JsonElement?.asDoubleOrNull(): Double? {
+    if (this == null || this is JsonNull) return null
+    return when (this) {
+        is JsonPrimitive -> this.doubleOrNull ?: this.content.toDoubleOrNull()
+        else -> null
+    }
+}
+
+fun JsonElement?.asLongOrNull(): Long? {
+    if (this == null || this is JsonNull) return null
+    return when (this) {
+        is JsonPrimitive -> this.longOrNull ?: this.content.toLongOrNull() ?: this.doubleOrNull?.toLong()
+        else -> null
+    }
+}
+
+fun JsonElement?.asIntOrNull(): Int? {
+    if (this == null || this is JsonNull) return null
+    return when (this) {
+        is JsonPrimitive -> this.intOrNull ?: this.content.toIntOrNull() ?: this.doubleOrNull?.toInt()
+        else -> null
+    }
+}
+
+fun JsonElement?.asStringOrNull(): String? {
+    if (this == null || this is JsonNull) return null
+    return when (this) {
+        is JsonPrimitive -> {
+            if (this.isString) this.content
+            else if (this.content != "null") this.content
+            else null
+        }
+        else -> null
+    }
+}
+
+/**
+ * Tolerantly parses "temperatures" in any shape returned by Status servers:
+ * a) empty list: []
+ * b) object keyed by sensor/core name with array [current, limit]: {"Core 0": [43.0, 100.0]}
+ * c) list of numbers: [43.0, 41.0]
+ * d) object with plain numbers: {"Package": 43.5}
+ * e) list of [current, limit] pairs
+ *
+ * For arrays/objects of numbers, takes the FIRST numeric value as current temperature
+ * and the second (if any) as the limit; skips values that are null, non-numeric,
+ * or outside -50..200; keeps sensor name as the label (or "Core N" for list items).
+ * Returns an empty list for anything unexpected instead of throwing.
+ */
+fun parseTemperatures(el: JsonElement?): List<TempReading> {
+    if (el == null || el is JsonNull) return emptyList()
+
+    fun extractValidNumbers(element: JsonElement): List<Double> {
+        return when (element) {
+            is JsonPrimitive -> {
+                val d = element.asDoubleOrNull()
+                if (d != null && d in -50.0..200.0) listOf(d) else emptyList()
+            }
+            is JsonArray -> {
+                element.mapNotNull { it.asDoubleOrNull() }.filter { it in -50.0..200.0 }
+            }
+            is JsonObject -> {
+                element.values.mapNotNull { it.asDoubleOrNull() }.filter { it in -50.0..200.0 }
+            }
+            else -> emptyList()
+        }
+    }
+
+    return try {
+        when (el) {
+            is JsonArray -> {
+                val readings = mutableListOf<TempReading>()
+                el.forEachIndexed { index, item ->
+                    val nums = extractValidNumbers(item)
+                    if (nums.isNotEmpty()) {
+                        val current = nums[0]
+                        val limit = nums.getOrNull(1)
+                        readings.add(TempReading(label = "Core $index", current = current, limit = limit))
+                    }
+                }
+                readings
+            }
+            is JsonObject -> {
+                val readings = mutableListOf<TempReading>()
+                for ((sensorName, value) in el) {
+                    val nums = extractValidNumbers(value)
+                    if (nums.isNotEmpty()) {
+                        val current = nums[0]
+                        val limit = nums.getOrNull(1)
+                        readings.add(TempReading(label = sensorName, current = current, limit = limit))
+                    }
+                }
+                readings
+            }
+            else -> emptyList()
+        }
+    } catch (_: Exception) {
+        emptyList()
+    }
+}
+
+/**
+ * Immutable domain models used by the presentation layer.
+ */
 @Immutable
 data class ServerStatus(
     val timestamp: Long = System.currentTimeMillis(),
@@ -19,7 +137,8 @@ data class ServerStatus(
     val memory: MemoryStatus = MemoryStatus(),
     val storage: StorageStatus = StorageStatus(),
     val network: NetworkStatus = NetworkStatus(),
-    val host: HostStatus = HostStatus()
+    val host: HostStatus = HostStatus(),
+    val partialDataSections: List<String> = emptyList()
 )
 
 @Immutable
@@ -27,13 +146,16 @@ data class CpuStatus(
     val loadPercent: Float = 0f,
     val model: String = "N/A",
     val coreCount: Int? = null,
-    val cacheInfo: String? = null,
-    val temperatures: List<Double> = emptyList(),
+    val cacheInfo: String = "N/A",
+    val tempReadings: List<TempReading> = emptyList(),
     val averageTemp: Double? = null,
+    val maxTemp: Double? = null,
     val hasTemperature: Boolean = false,
     val frequencies: Map<String, CpuFrequencyDto> = emptyMap(),
     val hasFrequencies: Boolean = false
-)
+) {
+    val temperatures: List<Double> get() = tempReadings.map { it.current }
+}
 
 @Immutable
 data class MemoryStatus(
@@ -47,8 +169,12 @@ data class MemoryStatus(
     val swapInUseBytes: Long = 0L,
     val hasSwap: Boolean = false,
     val swapUsagePercent: Float = 0f,
-    val processCount: Int? = null
-)
+    val processCount: Int? = null,
+    val totalKb: Long = 0L,
+    val availableKb: Long = 0L
+) {
+    val totalGbFormatted: String get() = FormatUtils.formatMemoryGb(totalBytes)
+}
 
 @Immutable
 data class VolumeInfo(
@@ -56,15 +182,25 @@ data class VolumeInfo(
     val totalBytes: Double,
     val availableBytes: Double,
     val inUseBytes: Double,
-    val usagePercent: Float
+    val usagePercent: Float,
+    val iconHint: String = "storage"
 )
 
 @Immutable
 data class StorageStatus(
     val volumes: List<VolumeInfo> = emptyList(),
-    val primaryVolume: VolumeInfo? = null,
+    val totalBytes: Double = 0.0,
+    val availableBytes: Double = 0.0,
+    val inUseBytes: Double = 0.0,
+    val usagePercent: Float = 0f,
     val hasVolumes: Boolean = false
-)
+) {
+    val volumeCountSummary: String
+        get() = "${volumes.size} ${if (volumes.size == 1) "volume" else "volumes"}"
+
+    val primaryVolume: VolumeInfo?
+        get() = volumes.firstOrNull()
+}
 
 @Immutable
 data class NetworkStatus(
@@ -74,7 +210,10 @@ data class NetworkStatus(
     val txRateBps: Double = 0.0,
     val rxTotalBytes: Long? = null,
     val txTotalBytes: Long? = null
-)
+) {
+    val linkSpeedFormatted: String
+        get() = if (linkSpeedMbit == null || linkSpeedMbit <= 0.0) "Unknown" else "${linkSpeedMbit.toInt()} Mbit/s"
+}
 
 @Immutable
 data class HostStatus(
@@ -83,6 +222,7 @@ data class HostStatus(
     val uptimeSeconds: Double = 0.0,
     val uptimeFormatted: String = "N/A",
     val loadAvg: List<Double> = emptyList(),
+    val appMemoryKb: Double? = null,
     val appMemoryFormatted: String = "N/A"
 )
 
@@ -125,8 +265,12 @@ data class ChartHistory(
 
 /**
  * Defensive parsing and transformation logic from DTO to Domain.
+ * Each section is parsed in its own runCatching block so an issue in one
+ * section never fails the entire response.
  */
 object StatusMapper {
+
+    fun parseTemperatures(el: JsonElement?): List<TempReading> = com.example.data.model.parseTemperatures(el)
 
     fun map(
         dto: StatusDto,
@@ -135,164 +279,88 @@ object StatusMapper {
         previousTimestamp: Long?,
         currentTimestamp: Long
     ): Pair<ServerStatus, Pair<Double, Double>> {
+        val failedSections = mutableListOf<String>()
+
         // --- 1. CPU PARSING ---
-        val rawCpuLoad = dto.cpu?.utilisation ?: 0.0
-        val clampedCpuLoad = rawCpuLoad.toFloat().coerceIn(0f, 100f)
-        val cpuModel = dto.cpu?.model?.takeIf { it.isNotBlank() } ?: "N/A"
-        val coreCount = dto.cpu?.cores ?: dto.cpu?.count
-
-        // Defensive temperatures extraction:
-        // May be list of numbers, objects, or empty
-        val temps = mutableListOf<Double>()
-        dto.cpu?.temperatures?.forEach { elem ->
-            when (elem) {
-                is JsonPrimitive -> {
-                    elem.doubleOrNull?.let { temps.add(it) }
-                }
-                is JsonObject -> {
-                    val num = elem["temp"]?.let { (it as? JsonPrimitive)?.doubleOrNull }
-                        ?: elem["value"]?.let { (it as? JsonPrimitive)?.doubleOrNull }
-                        ?: elem.values.firstOrNull { it is JsonPrimitive && it.doubleOrNull != null }
-                            ?.let { (it as JsonPrimitive).doubleOrNull }
-                    if (num != null) temps.add(num)
-                }
-                else -> {}
+        val cpuStatus = runCatching {
+            val cpuEl = dto.cpu
+            if (cpuEl == null || cpuEl !is JsonObject) {
+                if (dto.cpu != null && dto.cpu !is JsonNull) failedSections.add("CPU")
+                CpuStatus()
+            } else {
+                parseCpu(cpuEl)
             }
+        }.getOrElse {
+            failedSections.add("CPU")
+            CpuStatus()
         }
-        val avgTemp = if (temps.isNotEmpty()) temps.average() else null
-
-        // Cache formatting
-        val cacheStr = when (val c = dto.cpu?.cache) {
-            is JsonPrimitive -> c.content.takeIf { it.isNotBlank() && it != "null" }
-            is JsonObject -> c.toString()
-            else -> null
-        }
-
-        // Frequencies filtering: only keep if at least one core has a non-null frequency
-        val freqMap = dto.cpu?.frequencies?.mapNotNull { (core, freq) ->
-            if (freq != null && (freq.now != null || freq.max != null)) core to freq else null
-        }?.toMap() ?: emptyMap()
-
-        val cpuStatus = CpuStatus(
-            loadPercent = clampedCpuLoad,
-            model = cpuModel,
-            coreCount = coreCount,
-            cacheInfo = cacheStr,
-            temperatures = temps,
-            averageTemp = avgTemp,
-            hasTemperature = temps.isNotEmpty(),
-            frequencies = freqMap,
-            hasFrequencies = freqMap.isNotEmpty()
-        )
 
         // --- 2. MEMORY PARSING ---
-        // Memory values are in kB
-        val memTotalKb = dto.memory?.total ?: 0L
-        val memAvailKb = dto.memory?.available ?: 0L
-        val memCachedKb = dto.memory?.cached ?: 0L
-        val memInUseKb = (memTotalKb - memAvailKb).coerceAtLeast(0L)
-        val memUsagePercent = if (memTotalKb > 0L) {
-            ((memInUseKb.toDouble() / memTotalKb.toDouble()) * 100.0).toFloat().coerceIn(0f, 100f)
-        } else 0f
-
-        val swapTotalKb = dto.memory?.swapTotal ?: 0L
-        val swapAvailKb = dto.memory?.swapAvailable ?: 0L
-        val swapInUseKb = (swapTotalKb - swapAvailKb).coerceAtLeast(0L)
-        val hasSwap = swapTotalKb > 0L
-        val swapUsagePercent = if (hasSwap) {
-            ((swapInUseKb.toDouble() / swapTotalKb.toDouble()) * 100.0).toFloat().coerceIn(0f, 100f)
-        } else 0f
-
-        val memoryStatus = MemoryStatus(
-            totalBytes = memTotalKb * 1024L,
-            availableBytes = memAvailKb * 1024L,
-            inUseBytes = memInUseKb * 1024L,
-            cachedBytes = memCachedKb * 1024L,
-            usagePercent = memUsagePercent,
-            swapTotalBytes = swapTotalKb * 1024L,
-            swapAvailableBytes = swapAvailKb * 1024L,
-            swapInUseBytes = swapInUseKb * 1024L,
-            hasSwap = hasSwap,
-            swapUsagePercent = swapUsagePercent,
-            processCount = dto.memory?.processes
-        )
+        val memoryStatus = runCatching {
+            val memEl = dto.memory
+            if (memEl == null || memEl !is JsonObject) {
+                if (dto.memory != null && dto.memory !is JsonNull) failedSections.add("Memory")
+                MemoryStatus()
+            } else {
+                parseMemory(memEl)
+            }
+        }.getOrElse {
+            failedSections.add("Memory")
+            MemoryStatus()
+        }
 
         // --- 3. STORAGE PARSING ---
-        // Storage is keyed by volume name; total and available are in BYTES
-        val volumeList = mutableListOf<VolumeInfo>()
-        dto.storage?.forEach { (volumeName, volDto) ->
-            val totalBytes = volDto.total ?: 0.0
-            val availBytes = volDto.available ?: 0.0
-            val inUseBytes = (totalBytes - availBytes).coerceAtLeast(0.0)
-            val usagePct = if (totalBytes > 0.0) {
-                ((inUseBytes / totalBytes) * 100.0).toFloat().coerceIn(0f, 100f)
-            } else 0f
-            volumeList.add(
-                VolumeInfo(
-                    name = volumeName,
-                    totalBytes = totalBytes,
-                    availableBytes = availBytes,
-                    inUseBytes = inUseBytes,
-                    usagePercent = usagePct
-                )
-            )
+        val storageStatus = runCatching {
+            val storageEl = dto.storage
+            if (storageEl == null || storageEl !is JsonObject) {
+                if (dto.storage != null && dto.storage !is JsonNull) failedSections.add("Storage")
+                StorageStatus()
+            } else {
+                parseStorage(storageEl)
+            }
+        }.getOrElse {
+            failedSections.add("Storage")
+            StorageStatus()
         }
-        val storageStatus = StorageStatus(
-            volumes = volumeList,
-            primaryVolume = volumeList.firstOrNull(),
-            hasVolumes = volumeList.isNotEmpty()
-        )
 
         // --- 4. NETWORK PARSING & RATE CALCULATION ---
-        val currentRx = dto.network?.rx
-        val currentTx = dto.network?.tx
         var rxRateBps = 0.0
         var txRateBps = 0.0
-
-        if (previousRxBytes != null && previousTxBytes != null && previousTimestamp != null &&
-            currentRx != null && currentTx != null
-        ) {
-            val elapsedSec = (currentTimestamp - previousTimestamp).toDouble() / 1000.0
-            if (elapsedSec > 0.3) {
-                // If counter decreased, treat as reset and skip rate calculation
-                if (currentRx >= previousRxBytes) {
-                    rxRateBps = (currentRx - previousRxBytes).toDouble() / elapsedSec
-                }
-                if (currentTx >= previousTxBytes) {
-                    txRateBps = (currentTx - previousTxBytes).toDouble() / elapsedSec
-                }
+        val networkStatus = runCatching {
+            val netEl = dto.network
+            if (netEl == null || netEl !is JsonObject) {
+                if (dto.network != null && dto.network !is JsonNull) failedSections.add("Network")
+                NetworkStatus()
+            } else {
+                val (netStatus, rates) = parseNetwork(
+                    obj = netEl,
+                    previousRxBytes = previousRxBytes,
+                    previousTxBytes = previousTxBytes,
+                    previousTimestamp = previousTimestamp,
+                    currentTimestamp = currentTimestamp
+                )
+                rxRateBps = rates.first
+                txRateBps = rates.second
+                netStatus
             }
+        }.getOrElse {
+            failedSections.add("Network")
+            NetworkStatus()
         }
-
-        val networkStatus = NetworkStatus(
-            interfaceName = dto.network?.interfaceName?.takeIf { it.isNotBlank() } ?: "N/A",
-            linkSpeedMbit = dto.network?.speed,
-            rxRateBps = rxRateBps,
-            txRateBps = txRateBps,
-            rxTotalBytes = currentRx,
-            txTotalBytes = currentTx
-        )
 
         // --- 5. HOST PARSING ---
-        val uptimeSec = dto.host?.uptime ?: 0.0
-        val uptimeFormatted = formatUptime(uptimeSec)
-        val loadavg = dto.host?.loadavg ?: emptyList()
-        val appMem = when (val am = dto.host?.appMemory) {
-            is JsonPrimitive -> {
-                val num = am.doubleOrNull
-                if (num != null) formatBytes(num * 1024.0) else am.content
+        val hostStatus = runCatching {
+            val hostEl = dto.host
+            if (hostEl == null || hostEl !is JsonObject) {
+                if (dto.host != null && dto.host !is JsonNull) failedSections.add("Host")
+                HostStatus()
+            } else {
+                parseHost(hostEl)
             }
-            else -> "N/A"
+        }.getOrElse {
+            failedSections.add("Host")
+            HostStatus()
         }
-
-        val hostStatus = HostStatus(
-            hostname = dto.host?.hostname?.takeIf { it.isNotBlank() } ?: "N/A",
-            os = dto.host?.os?.takeIf { it.isNotBlank() } ?: "N/A",
-            uptimeSeconds = uptimeSec,
-            uptimeFormatted = uptimeFormatted,
-            loadAvg = loadavg,
-            appMemoryFormatted = appMem
-        )
 
         val serverStatus = ServerStatus(
             timestamp = currentTimestamp,
@@ -300,10 +368,216 @@ object StatusMapper {
             memory = memoryStatus,
             storage = storageStatus,
             network = networkStatus,
-            host = hostStatus
+            host = hostStatus,
+            partialDataSections = failedSections
         )
 
         return Pair(serverStatus, Pair(rxRateBps, txRateBps))
+    }
+
+    private fun parseCpu(obj: JsonObject): CpuStatus {
+        val rawLoad = obj["utilisation"].asDoubleOrNull() ?: 0.0
+        // cpu.utilisation is a FRACTION from 0.0 to 1.0 (0.0251 means 2.5% load).
+        // Multiply by 100 for percentage and clamp to 0..100.
+        val loadPercent = if (rawLoad in 0.0..1.0) {
+            (rawLoad * 100.0).toFloat().coerceIn(0f, 100f)
+        } else {
+            rawLoad.toFloat().coerceIn(0f, 100f)
+        }
+
+        val model = obj["model"].asStringOrNull()?.takeIf { it.isNotBlank() } ?: "N/A"
+        val coreCount = obj["cores"].asIntOrNull() ?: obj["count"].asIntOrNull()
+
+        val tempReadings = parseTemperatures(obj["temperatures"])
+        val avgTemp = if (tempReadings.isNotEmpty()) tempReadings.map { it.current }.average() else null
+        val maxTemp = if (tempReadings.isNotEmpty()) tempReadings.maxOf { it.current } else null
+
+        // cpu.cache is in kB (6144 = 6 MB, show as "6 MB"); null means "N/A"
+        val cacheRaw = obj["cache"]
+        val cacheStr = when {
+            cacheRaw == null || cacheRaw is JsonNull -> "N/A"
+            cacheRaw is JsonPrimitive -> {
+                val kb = cacheRaw.asDoubleOrNull()
+                if (kb != null) FormatUtils.formatCache(kb)
+                else cacheRaw.asStringOrNull()?.takeIf { it.isNotBlank() && it != "null" } ?: "N/A"
+            }
+            else -> cacheRaw.toString()
+        }
+
+        // cpu.frequencies: values are MHz integers. Skip cores whose "now" is null.
+        val freqMap = mutableMapOf<String, CpuFrequencyDto>()
+        val freqEl = obj["frequencies"]
+        if (freqEl is JsonObject) {
+            for ((core, fVal) in freqEl) {
+                if (fVal is JsonObject) {
+                    val now = fVal["now"].asDoubleOrNull()
+                    if (now == null) continue // Skip cores whose "now" is null!
+                    val min = fVal["min"].asDoubleOrNull()
+                    val base = fVal["base"].asDoubleOrNull()
+                    val max = fVal["max"].asDoubleOrNull()
+                    freqMap[core] = CpuFrequencyDto(now = now, min = min, base = base, max = max)
+                }
+            }
+        }
+
+        return CpuStatus(
+            loadPercent = loadPercent,
+            model = model,
+            coreCount = coreCount,
+            cacheInfo = cacheStr,
+            tempReadings = tempReadings,
+            averageTemp = avgTemp,
+            maxTemp = maxTemp,
+            hasTemperature = tempReadings.isNotEmpty(),
+            frequencies = freqMap,
+            hasFrequencies = freqMap.isNotEmpty()
+        )
+    }
+
+    private fun parseMemory(obj: JsonObject): MemoryStatus {
+        // Memory values are in kB (KiB): divide by 1024*1024 for GB.
+        val totalKb = obj["total"].asLongOrNull() ?: 0L
+        val availKb = obj["available"].asLongOrNull() ?: 0L
+        val cachedKb = obj["cached"].asLongOrNull() ?: 0L
+        val inUseKb = (totalKb - availKb).coerceAtLeast(0L)
+        val usagePercent = if (totalKb > 0L) {
+            ((inUseKb.toDouble() / totalKb.toDouble()) * 100.0).toFloat().coerceIn(0f, 100f)
+        } else 0f
+
+        val swapTotalKb = obj["swap_total"].asLongOrNull() ?: 0L
+        val swapAvailKb = obj["swap_available"].asLongOrNull() ?: 0L
+        val swapInUseKb = (swapTotalKb - swapAvailKb).coerceAtLeast(0L)
+        val hasSwap = swapTotalKb > 0L
+        val swapUsagePercent = if (hasSwap) {
+            ((swapInUseKb.toDouble() / swapTotalKb.toDouble()) * 100.0).toFloat().coerceIn(0f, 100f)
+        } else 0f
+
+        val processCount = obj["processes"].asIntOrNull()
+
+        return MemoryStatus(
+            totalBytes = totalKb * 1024L,
+            availableBytes = availKb * 1024L,
+            inUseBytes = inUseKb * 1024L,
+            cachedBytes = cachedKb * 1024L,
+            usagePercent = usagePercent,
+            swapTotalBytes = swapTotalKb * 1024L,
+            swapAvailableBytes = swapAvailKb * 1024L,
+            swapInUseBytes = swapInUseKb * 1024L,
+            hasSwap = hasSwap,
+            swapUsagePercent = swapUsagePercent,
+            processCount = processCount,
+            totalKb = totalKb,
+            availableKb = availKb
+        )
+    }
+
+    private fun parseStorage(obj: JsonObject): StorageStatus {
+        // JSON object order must be preserved (JsonObject preserves iteration order)
+        val volumeList = mutableListOf<VolumeInfo>()
+        for ((volumeName, volEl) in obj) {
+            if (volEl is JsonObject) {
+                val totalBytes = volEl["total"].asDoubleOrNull() ?: 0.0
+                val availBytes = volEl["available"].asDoubleOrNull() ?: 0.0
+                val inUseBytes = (totalBytes - availBytes).coerceAtLeast(0.0)
+                val usagePct = if (totalBytes > 0.0) {
+                    ((inUseBytes / totalBytes) * 100.0).toFloat().coerceIn(0f, 100f)
+                } else 0f
+                val iconHint = volEl["icon"].asStringOrNull() ?: "storage"
+                volumeList.add(
+                    VolumeInfo(
+                        name = volumeName,
+                        totalBytes = totalBytes,
+                        availableBytes = availBytes,
+                        inUseBytes = inUseBytes,
+                        usagePercent = usagePct,
+                        iconHint = iconHint
+                    )
+                )
+            }
+        }
+
+        val totalAcrossVolumes = volumeList.sumOf { it.totalBytes }
+        val availAcrossVolumes = volumeList.sumOf { it.availableBytes }
+        val inUseAcrossVolumes = (totalAcrossVolumes - availAcrossVolumes).coerceAtLeast(0.0)
+        val totalUsagePct = if (totalAcrossVolumes > 0.0) {
+            ((inUseAcrossVolumes / totalAcrossVolumes) * 100.0).toFloat().coerceIn(0f, 100f)
+        } else 0f
+
+        return StorageStatus(
+            volumes = volumeList,
+            totalBytes = totalAcrossVolumes,
+            availableBytes = availAcrossVolumes,
+            inUseBytes = inUseAcrossVolumes,
+            usagePercent = totalUsagePct,
+            hasVolumes = volumeList.isNotEmpty()
+        )
+    }
+
+    private fun parseNetwork(
+        obj: JsonObject,
+        previousRxBytes: Long?,
+        previousTxBytes: Long?,
+        previousTimestamp: Long?,
+        currentTimestamp: Long
+    ): Pair<NetworkStatus, Pair<Double, Double>> {
+        val iface = obj["interface"].asStringOrNull()?.takeIf { it.isNotBlank() } ?: "N/A"
+        val speed = obj["speed"].asDoubleOrNull()
+        val rx = obj["rx"].asLongOrNull()
+        val tx = obj["tx"].asLongOrNull()
+
+        var rxRateBps = 0.0
+        var txRateBps = 0.0
+
+        if (previousRxBytes != null && previousTxBytes != null && previousTimestamp != null &&
+            rx != null && tx != null
+        ) {
+            val elapsedSec = (currentTimestamp - previousTimestamp).toDouble() / 1000.0
+            if (elapsedSec > 0.3) {
+                if (rx >= previousRxBytes) {
+                    rxRateBps = (rx - previousRxBytes).toDouble() / elapsedSec
+                }
+                if (tx >= previousTxBytes) {
+                    txRateBps = (tx - previousTxBytes).toDouble() / elapsedSec
+                }
+            }
+        }
+
+        val networkStatus = NetworkStatus(
+            interfaceName = iface,
+            linkSpeedMbit = speed,
+            rxRateBps = rxRateBps,
+            txRateBps = txRateBps,
+            rxTotalBytes = rx,
+            txTotalBytes = tx
+        )
+
+        return Pair(networkStatus, Pair(rxRateBps, txRateBps))
+    }
+
+    private fun parseHost(obj: JsonObject): HostStatus {
+        val uptimeSec = obj["uptime"].asDoubleOrNull() ?: 0.0
+        val uptimeFormatted = formatUptime(uptimeSec)
+        val hostname = obj["hostname"].asStringOrNull()?.takeIf { it.isNotBlank() } ?: "N/A"
+        val os = obj["os"].asStringOrNull()?.takeIf { it.isNotBlank() } ?: "N/A"
+
+        val loadAvgList = when (val la = obj["loadavg"]) {
+            is JsonArray -> la.mapNotNull { it.asDoubleOrNull() }
+            else -> emptyList()
+        }
+
+        // host.app_memory is a STRING in kB ("37820"): parse with asDoubleOrNull
+        val appMemKb = obj["app_memory"].asDoubleOrNull()
+        val appMemFormatted = if (appMemKb != null) FormatUtils.formatBytes(appMemKb * 1024.0) else "N/A"
+
+        return HostStatus(
+            hostname = hostname,
+            os = os,
+            uptimeSeconds = uptimeSec,
+            uptimeFormatted = uptimeFormatted,
+            loadAvg = loadAvgList,
+            appMemoryKb = appMemKb,
+            appMemoryFormatted = appMemFormatted
+        )
     }
 
     private fun formatUptime(uptimeSeconds: Double): String {
@@ -317,22 +591,6 @@ object StatusMapper {
             days > 0 -> "${days}d ${hours}h ${minutes}m"
             hours > 0 -> "${hours}h ${minutes}m"
             else -> "${minutes}m ${(totalSec % 60)}s"
-        }
-    }
-
-    fun formatBytes(bytes: Double): String {
-        if (bytes <= 0.0) return "0 B"
-        val units = arrayOf("B", "KB", "MB", "GB", "TB", "PB")
-        var value = bytes
-        var unitIndex = 0
-        while (value >= 1024.0 && unitIndex < units.size - 1) {
-            value /= 1024.0
-            unitIndex++
-        }
-        return if (value >= 100 || unitIndex == 0) {
-            String.format(Locale.US, "%.0f %s", value, units[unitIndex])
-        } else {
-            String.format(Locale.US, "%.1f %s", value, units[unitIndex])
         }
     }
 }

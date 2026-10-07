@@ -267,16 +267,16 @@ fun StorageDashboardCard(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            val primary = storage.primaryVolume
-            if (primary != null) {
+            val hasVolumes = storage.hasVolumes
+            if (hasVolumes) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     ArcGauge(
-                        value = primary.usagePercent,
-                        label = primary.name,
-                        valueText = FormatUtils.formatPercent(primary.usagePercent),
+                        value = storage.usagePercent,
+                        label = "Total in use",
+                        valueText = FormatUtils.formatPercent(storage.usagePercent),
                         reduceAnimations = reduceAnimations,
                         size = 120.dp
                     )
@@ -287,10 +287,10 @@ fun StorageDashboardCard(
                         modifier = Modifier.weight(1f),
                         verticalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        StatRow(label = "Volume", value = primary.name)
-                        StatRow(label = "In use", value = FormatUtils.formatBytes(primary.inUseBytes))
-                        StatRow(label = "Total", value = FormatUtils.formatBytes(primary.totalBytes))
-                        StatRow(label = "Volumes", value = "${storage.volumes.size} mounted")
+                        StatRow(label = "Volumes", value = storage.volumeCountSummary)
+                        StatRow(label = "In use", value = FormatUtils.formatBytes(storage.inUseBytes))
+                        StatRow(label = "Total", value = FormatUtils.formatBytes(storage.totalBytes))
+                        StatRow(label = "Available", value = FormatUtils.formatBytes(storage.availableBytes))
                     }
                 }
             } else {
@@ -379,7 +379,7 @@ fun NetworkDashboardCard(
                 StatRow(label = "Interface", value = network.interfaceName)
                 StatRow(
                     label = "Link speed",
-                    value = network.linkSpeedMbit?.let { "${it.toInt()} Mbit/s" } ?: "N/A"
+                    value = network.linkSpeedFormatted
                 )
             }
         }

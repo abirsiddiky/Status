@@ -2,10 +2,11 @@ package com.example.data
 
 import com.example.data.model.ServerConfig
 import com.example.data.model.StatusDto
+import com.example.data.model.asStringOrNull
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import kotlinx.serialization.SerializationException
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
@@ -42,7 +43,8 @@ class StatusApi(
 
     /**
      * Tests connectivity to the given server configuration.
-     * Invokes GET {baseUrl}/api/status with exact diagnostic reporting.
+     * Invokes GET {baseUrl}/api/status.
+     * Only network failures, HTTP errors, or non-JsonObject bodies report Failure.
      */
     suspend fun testConnection(server: ServerConfig): ConnectionTestResult = withContext(Dispatchers.IO) {
         val url = "${server.getBaseUrl()}/api/status"
@@ -74,19 +76,25 @@ class StatusApi(
                 }
 
                 try {
-                    val dto = json.decodeFromString<StatusDto>(bodyString)
+                    val rootEl = json.parseToJsonElement(bodyString)
+                    if (rootEl !is JsonObject) {
+                        return@withContext ConnectionTestResult.Failure(
+                            "Connection failed: Server response is not a JSON object"
+                        )
+                    }
+
+                    val hostObj = rootEl["host"] as? JsonObject
+                    val hostname = hostObj?.get("hostname").asStringOrNull()
+                    val os = hostObj?.get("os").asStringOrNull()
+
                     ConnectionTestResult.Success(
                         latencyMs = latency,
-                        hostname = dto.host?.hostname,
-                        os = dto.host?.os
-                    )
-                } catch (e: SerializationException) {
-                    ConnectionTestResult.Failure(
-                        "Server returned an unexpected response: ${e.message}"
+                        hostname = hostname,
+                        os = os
                     )
                 } catch (e: Exception) {
                     ConnectionTestResult.Failure(
-                        "Failed to parse server response: ${e.message}"
+                        "Connection failed: Invalid JSON response (${e.message})"
                     )
                 }
             }
@@ -104,8 +112,9 @@ class StatusApi(
     }
 
     /**
-     * Fetches real telemetry from GET {baseUrl}/api/status on Dispatchers.IO.
-     * Decodes JSON defensively off the main thread.
+     * Fetches telemetry from GET {baseUrl}/api/status on Dispatchers.IO.
+     * Parses body as a JsonObject first. Only network failures, HTTP errors,
+     * or non-JsonObject bodies fail the call.
      */
     suspend fun fetchStatus(server: ServerConfig): Result<StatusDto> = withContext(Dispatchers.IO) {
         val url = "${server.getBaseUrl()}/api/status"
@@ -134,15 +143,24 @@ class StatusApi(
                 }
 
                 try {
-                    val dto = json.decodeFromString<StatusDto>(body)
-                    Result.success(dto)
-                } catch (e: SerializationException) {
-                    Result.failure(
-                        IllegalStateException("Server returned an unexpected response: ${e.message}", e)
+                    val rootEl = json.parseToJsonElement(body)
+                    if (rootEl !is JsonObject) {
+                        return@withContext Result.failure(
+                            IllegalStateException("Connection failed: Server response is not a JSON object")
+                        )
+                    }
+
+                    val dto = StatusDto(
+                        cpu = rootEl["cpu"],
+                        memory = rootEl["memory"],
+                        storage = rootEl["storage"],
+                        network = rootEl["network"],
+                        host = rootEl["host"]
                     )
+                    Result.success(dto)
                 } catch (e: Exception) {
                     Result.failure(
-                        IllegalStateException("Failed to parse status JSON: ${e.message}", e)
+                        IllegalStateException("Connection failed: Invalid JSON response (${e.message})", e)
                     )
                 }
             }

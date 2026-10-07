@@ -3,7 +3,6 @@ package com.example.ui.screens
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -27,7 +26,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.example.data.AppSettings
 import com.example.data.model.ChartHistory
 import com.example.data.model.CpuStatus
@@ -68,7 +66,7 @@ fun CpuDetailScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // General Status Card (Load and Temperature)
+            // General Status Card (Load and Average Temperature + Max)
             item(key = "cpu_status_card") {
                 Card(
                     modifier = Modifier.fillMaxWidth(),
@@ -96,15 +94,25 @@ fun CpuDetailScreen(
                             )
 
                             if (cpu.hasTemperature && cpu.averageTemp != null) {
-                                ArcGauge(
-                                    value = cpu.averageTemp.toFloat(),
-                                    maxValue = 105f,
-                                    label = "Average Temp",
-                                    valueText = FormatUtils.formatTemperature(cpu.averageTemp),
-                                    customColor = ChartTempColor,
-                                    reduceAnimations = settings.reduceAnimations,
-                                    size = 120.dp
-                                )
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    ArcGauge(
+                                        value = cpu.averageTemp.toFloat(),
+                                        maxValue = 105f,
+                                        label = "Average Temp",
+                                        valueText = FormatUtils.formatTemperature(cpu.averageTemp),
+                                        customColor = ChartTempColor,
+                                        reduceAnimations = settings.reduceAnimations,
+                                        size = 120.dp
+                                    )
+                                    if (cpu.maxTemp != null) {
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                            text = "Max: ${FormatUtils.formatTemperature(cpu.maxTemp)}",
+                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
                             } else {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                                     Text(
@@ -119,6 +127,59 @@ fun CpuDetailScreen(
                                     )
                                 }
                             }
+                        }
+                    }
+                }
+            }
+
+            // Temperatures Sensor List Card (One row per sensor with limit)
+            item(key = "cpu_temperatures_card") {
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface)
+                ) {
+                    Column(modifier = Modifier.padding(18.dp)) {
+                        Text(
+                            text = "Temperatures",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        if (cpu.tempReadings.isNotEmpty()) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                cpu.tempReadings.forEach { reading ->
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = reading.label,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        val currentStr = FormatUtils.formatTemperature(reading.current)
+                                        val limitStr = if (reading.limit != null) " (Limit ${FormatUtils.formatTemperature(reading.limit)})" else ""
+                                        Text(
+                                            text = "$currentStr$limitStr",
+                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                            color = ChartTempColor
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Text(
+                                text = "No sensor on this device",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
                 }
@@ -176,7 +237,7 @@ fun CpuDetailScreen(
                 }
             }
 
-            // Temperature History Chart (only if sensor exists)
+            // Temperature History Chart of average temperature (only if sensor exists)
             if (cpu.hasTemperature && history.cpuTemp.isNotEmpty()) {
                 item(key = "cpu_temp_chart") {
                     Card(

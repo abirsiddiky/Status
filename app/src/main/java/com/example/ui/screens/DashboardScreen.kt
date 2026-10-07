@@ -136,7 +136,8 @@ fun DashboardScreen(
                             isOnline = telemetry.isOnline,
                             isLoading = telemetry.isLoading,
                             lastUpdated = telemetry.lastSuccessfulUpdate,
-                            errorMessage = telemetry.errorMessage
+                            errorMessage = telemetry.errorMessage,
+                            partialDataSections = telemetry.status?.partialDataSections ?: emptyList()
                         )
                     }
 
@@ -223,7 +224,8 @@ fun StatusIndicatorHeader(
     isOnline: Boolean,
     isLoading: Boolean,
     lastUpdated: Long,
-    errorMessage: String?
+    errorMessage: String?,
+    partialDataSections: List<String> = emptyList()
 ) {
     Surface(
         shape = RoundedCornerShape(12.dp),
@@ -232,49 +234,74 @@ fun StatusIndicatorHeader(
             .fillMaxWidth()
             .testTag("status_indicator_header")
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+                .padding(horizontal = 14.dp, vertical = 10.dp)
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // Glowing dot
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .clip(CircleShape)
-                        .background(if (isOnline) StatusOnlineGreen else StatusOfflineRed)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = if (isOnline) "Online" else "Offline",
-                    style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
-                    color = if (isOnline) StatusOnlineGreen else StatusOfflineRed
-                )
-                if (isOnline && lastUpdated > 0L) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Glowing dot
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .clip(CircleShape)
+                            .background(if (isOnline) StatusOnlineGreen else StatusOfflineRed)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = " • ${FormatUtils.formatTime(lastUpdated)}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = if (isOnline) "Online" else "Offline",
+                        style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold),
+                        color = if (isOnline) StatusOnlineGreen else StatusOfflineRed
+                    )
+                    if (isOnline && lastUpdated > 0L) {
+                        Text(
+                            text = " • ${FormatUtils.formatTime(lastUpdated)}",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                if (isLoading) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(14.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                } else if (!isOnline && errorMessage != null) {
+                    Text(
+                        text = errorMessage.take(30),
+                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
+                        color = StatusOfflineRed,
+                        maxLines = 1
                     )
                 }
             }
 
-            if (isLoading) {
-                CircularProgressIndicator(
-                    modifier = Modifier.size(14.dp),
-                    strokeWidth = 2.dp,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            } else if (!isOnline && errorMessage != null) {
-                Text(
-                    text = errorMessage.take(30),
-                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp),
-                    color = StatusOfflineRed,
-                    maxLines = 1
-                )
+            // Small "Partial data" info chip whose details list the section names that could not be read
+            if (isOnline && partialDataSections.isNotEmpty()) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
+                    modifier = Modifier.testTag("partial_data_chip")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Partial data: ${partialDataSections.joinToString(", ")} could not be read",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Medium),
+                            color = MaterialTheme.colorScheme.onErrorContainer
+                        )
+                    }
+                }
             }
         }
     }

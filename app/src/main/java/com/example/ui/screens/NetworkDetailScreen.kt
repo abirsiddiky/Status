@@ -157,7 +157,7 @@ fun NetworkDetailScreen(
                         NetworkDetailRow("Interface", network.interfaceName)
                         NetworkDetailRow(
                             "Link speed",
-                            network.linkSpeedMbit?.let { "${it.toInt()} Mbit/s" } ?: "N/A"
+                            network.linkSpeedFormatted
                         )
                         NetworkDetailRow(
                             "Total received (RX)",

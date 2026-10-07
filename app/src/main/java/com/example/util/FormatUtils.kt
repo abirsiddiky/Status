@@ -24,6 +24,29 @@ object FormatUtils {
 
     fun formatBytes(bytes: Long): String = formatBytes(bytes.toDouble())
 
+    fun formatMemoryGb(bytes: Long): String {
+        val gb = bytes.toDouble() / (1024.0 * 1024.0 * 1024.0)
+        return String.format(Locale.US, "%.2f GB", gb)
+    }
+
+    fun formatCache(cacheKb: Double?): String {
+        if (cacheKb == null || cacheKb <= 0.0) return "N/A"
+        val mb = cacheKb / 1024.0
+        return if (mb >= 1.0) {
+            if (mb == mb.toLong().toDouble()) {
+                "${mb.toLong()} MB"
+            } else {
+                String.format(Locale.US, "%.1f MB", mb)
+            }
+        } else {
+            if (cacheKb == cacheKb.toLong().toDouble()) {
+                "${cacheKb.toLong()} KB"
+            } else {
+                String.format(Locale.US, "%.1f KB", cacheKb)
+            }
+        }
+    }
+
     /**
      * Formats bit rates (e.g. from network bytes per second * 8).
      */
@@ -38,12 +61,16 @@ object FormatUtils {
         }
     }
 
-    fun formatFrequency(mhzOrGhz: Double?): String {
-        if (mhzOrGhz == null || mhzOrGhz <= 0.0) return "N/A"
-        return if (mhzOrGhz >= 1000.0) {
-            String.format(Locale.US, "%.2f GHz", mhzOrGhz / 1000.0)
+    /**
+     * Values are MHz integers (now, min, base, max).
+     * Show GHz with two decimals when 1000 MHz or more.
+     */
+    fun formatFrequency(mhz: Double?): String {
+        if (mhz == null || mhz <= 0.0) return "N/A"
+        return if (mhz >= 1000.0) {
+            String.format(Locale.US, "%.2f GHz", mhz / 1000.0)
         } else {
-            String.format(Locale.US, "%.0f MHz", mhzOrGhz)
+            String.format(Locale.US, "%.0f MHz", mhz)
         }
     }
 
@@ -52,8 +79,16 @@ object FormatUtils {
         return String.format(Locale.US, "%.1f°C", tempC)
     }
 
+    /**
+     * Show one decimal below 10%, else a whole number.
+     */
     fun formatPercent(value: Float): String {
-        return String.format(Locale.US, "%.1f%%", value.coerceIn(0f, 100f))
+        val clamped = value.coerceIn(0f, 100f)
+        return if (clamped < 10f) {
+            String.format(Locale.US, "%.1f%%", clamped)
+        } else {
+            String.format(Locale.US, "%.0f%%", clamped)
+        }
     }
 
     fun formatTime(timestamp: Long): String {

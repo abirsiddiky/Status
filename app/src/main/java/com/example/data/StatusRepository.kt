@@ -61,8 +61,8 @@ class StatusRepository(
             )
 
             // Update rate tracking
-            lastRxBytes = dto.network?.rx
-            lastTxBytes = dto.network?.tx
+            lastRxBytes = domainStatus.network.rxTotalBytes
+            lastTxBytes = domainStatus.network.txTotalBytes
             lastRateTimestamp = now
 
             val (rxRateBps, txRateBps) = rates
