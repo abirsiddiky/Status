@@ -17,6 +17,4 @@
 .cxx
 local.properties
 .env
-debug.keystore
-README.md
-/assets/
+debug.keystore*
